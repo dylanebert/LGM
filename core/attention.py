@@ -10,8 +10,7 @@
 import os
 import warnings
 
-from torch import Tensor
-from torch import nn
+from torch import Tensor, nn
 
 XFORMERS_ENABLED = os.environ.get("XFORMERS_DISABLED") is None
 try:
@@ -50,7 +49,11 @@ class Attention(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        qkv = (
+            self.qkv(x)
+            .reshape(B, N, 3, self.num_heads, C // self.num_heads)
+            .permute(2, 0, 3, 1, 4)
+        )
 
         q, k, v = qkv[0] * self.scale, qkv[1], qkv[2]
         attn = q @ k.transpose(-2, -1)
@@ -111,24 +114,29 @@ class CrossAttention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, q: Tensor, k: Tensor, v: Tensor) -> Tensor:
-        # q: [B, N, Cq]
-        # k: [B, M, Ck]
-        # v: [B, M, Cv]
-        # return: [B, N, C]
-
         B, N, _ = q.shape
         M = k.shape[1]
-        
-        q = self.scale * self.to_q(q).reshape(B, N, self.num_heads, self.dim // self.num_heads).permute(0, 2, 1, 3) # [B, nh, N, C/nh]
-        k = self.to_k(k).reshape(B, M, self.num_heads, self.dim // self.num_heads).permute(0, 2, 1, 3) # [B, nh, M, C/nh]
-        v = self.to_v(v).reshape(B, M, self.num_heads, self.dim // self.num_heads).permute(0, 2, 1, 3) # [B, nh, M, C/nh]
 
-        attn = q @ k.transpose(-2, -1) # [B, nh, N, M]
+        q = self.scale * self.to_q(q).reshape(
+            B, N, self.num_heads, self.dim // self.num_heads
+        ).permute(0, 2, 1, 3)
+        k = (
+            self.to_k(k)
+            .reshape(B, M, self.num_heads, self.dim // self.num_heads)
+            .permute(0, 2, 1, 3)
+        )
+        v = (
+            self.to_v(v)
+            .reshape(B, M, self.num_heads, self.dim // self.num_heads)
+            .permute(0, 2, 1, 3)
+        )
 
-        attn = attn.softmax(dim=-1) # [B, nh, N, M]
+        attn = q @ k.transpose(-2, -1)
+
+        attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
 
-        x = (attn @ v).transpose(1, 2).reshape(B, N, -1) # [B, nh, N, M] @ [B, nh, M, C/nh] --> [B, nh, N, C/nh] --> [B, N, nh, C/nh] --> [B, N, C]
+        x = (attn @ v).transpose(1, 2).reshape(B, N, -1)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
@@ -139,14 +147,16 @@ class MemEffCrossAttention(CrossAttention):
         if not XFORMERS_AVAILABLE:
             if attn_bias is not None:
                 raise AssertionError("xFormers is required for using nested tensors")
-            return super().forward(x)
+            return super().forward(q, k, v)
 
         B, N, _ = q.shape
         M = k.shape[1]
 
-        q = self.scale * self.to_q(q).reshape(B, N, self.num_heads, self.dim // self.num_heads) # [B, N, nh, C/nh]
-        k = self.to_k(k).reshape(B, M, self.num_heads, self.dim // self.num_heads) # [B, M, nh, C/nh]
-        v = self.to_v(v).reshape(B, M, self.num_heads, self.dim // self.num_heads) # [B, M, nh, C/nh]
+        q = self.scale * self.to_q(q).reshape(
+            B, N, self.num_heads, self.dim // self.num_heads
+        )
+        k = self.to_k(k).reshape(B, M, self.num_heads, self.dim // self.num_heads)
+        v = self.to_v(v).reshape(B, M, self.num_heads, self.dim // self.num_heads)
 
         x = memory_efficient_attention(q, k, v, attn_bias=attn_bias)
         x = x.reshape(B, N, -1)
