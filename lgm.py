@@ -10,6 +10,7 @@ from diff_gaussian_rasterization import (
     GaussianRasterizationSettings,
     GaussianRasterizer,
 )
+from diffusers import DiffusionPipeline
 from torch import Tensor, nn
 
 
@@ -780,3 +781,15 @@ class LGM(nn.Module):
         gaussians = torch.cat([pos, opacity, scale, rotation, rgbs], dim=-1)
 
         return gaussians
+
+
+class LGMPipeline(DiffusionPipeline):
+    def __init__(self, lgm: LGM):
+        super().__init__()
+        self.register_modules(lgm=lgm)
+
+    @torch.no_grad()
+    def __call__(self, inputs):
+        self.lgm = self.lgm.half().cuda()
+
+        return self.lgm(inputs)

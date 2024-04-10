@@ -1,21 +1,19 @@
 import numpy as np
-import rembg
 import torch
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from safetensors.torch import load_file
-
-from lgm import LGM
+from lgm import LGM, LGMPipeline
 from multiview import image_to_multiview
 
-model = LGM().half().to("cuda")
+model = LGM()
 ckpt = load_file("pretrained/model_fp16.safetensors", device="cpu")
 model.load_state_dict(ckpt, strict=False)
+pipeline = LGMPipeline(model)
+
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
-
-bg_remover = rembg.new_session()
 
 images = image_to_multiview(
     "https://huggingface.co/datasets/dylanebert/3d-arena/resolve/main/cat_statue.jpg",
@@ -39,6 +37,6 @@ input_image = torch.cat([images, rays_embeddings], dim=1).unsqueeze(0)
 
 with torch.no_grad():
     with torch.autocast(device_type="cuda", dtype=torch.float16):
-        gaussians = model.forward(input_image)
+        gaussians = pipeline(input_image)
 
     model.gs.save_ply(gaussians, "output/gaussians.ply")
