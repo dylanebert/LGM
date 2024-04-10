@@ -1,12 +1,12 @@
-from safetensors.torch import load_file
+from diffusers import DiffusionPipeline
 
-from lgm import LGM, LGMPipeline
 from multiview import image_to_multiview
 
-model = LGM()
-ckpt = load_file("pretrained/model_fp16.safetensors", device="cpu")
-model.load_state_dict(ckpt, strict=False)
-pipeline = LGMPipeline(model)
+pipeline = DiffusionPipeline.from_pretrained(
+    "dylanebert/LGM",
+    custom_pipeline="dylanebert/LGM",
+    trust_remote_code=True,
+)
 
 images = image_to_multiview(
     "https://huggingface.co/datasets/dylanebert/3d-arena/resolve/main/cat_statue.jpg",
